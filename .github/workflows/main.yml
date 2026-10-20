@@ -29,17 +29,10 @@ jobs:
         run: mvn clean verify --file ./simple-api/pom.xml
 
       # Analyse de qualité SonarCloud
-      - name: SonarCloud analysis
+            - name: SonarCloud analysis
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-        run: >
-          mvn -B verify sonar:sonar
-          -Dsonar.projectKey=TON_PROJECT_KEY
-          -Dsonar.organization=TON_ORGANIZATION_KEY
-          -Dsonar.host.url=https://sonarcloud.io
-          -Dsonar.token=${{ secrets.SONAR_TOKEN }}
-          --file ./simple-api/pom.xml
+        run: mvn -B verify org.sonarsource.scanner.maven:sonar-maven-plugin:sonar -Dsonar.projectKey=TA_VRAIE_PROJECT_KEY -Dsonar.organization=TA_VRAIE_ORGANIZATION_KEY -Dsonar.host.url=https://sonarcloud.io -Dsonar.token=${{ secrets.SONAR_TOKEN }} --file ./simple-api/pom.xml
 
   build-and-push-docker-image:
     # Ne s'exécute que si les tests ont réussi
