@@ -1,79 +1,110 @@
 name: CI devops 2025
 
+# Quand lancer le pipeline
 on:
-  # Le workflow se lance sur les push vers main et develop
+  # à chaque push sur les branches main et develop
   push:
-    branches: [ main, develop ]
-
-  # Et sur toutes les pull requests
+    branches:
+      - main
+      - develop
+  # et à chaque pull request
   pull_request:
 
 jobs:
+  # Job 1 : compiler, tester et analyser l'API
   test-backend:
     runs-on: ubuntu-24.04
-
     steps:
-      # 1. Récupère le code (historique complet, nécessaire à Sonar)
-      - name: Checkout code
-        uses: actions/checkout@v4
+      # récupère le code du dépôt sur la machine (fetch-depth: 0 pour SonarCloud)
+      - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      # 2. Installe le JDK 21 avec cache Maven
+      # installe Java 21 (distribution Temurin)
       - name: Set up JDK 21
         uses: actions/setup-java@v4
         with:
-          java-version: '21'
           distribution: 'temurin'
-          cache: maven
+          java-version: '21'
 
-      # 3. Compile et lance les tests unitaires + d'intégration (Testcontainers)
+      # compile l'application et lance les tests unitaires + d'intégration
       - name: Build and test with Maven
         run: mvn clean verify --file ./simple-api/pom.xml
 
-      # 4. Analyse de qualité SonarCloud
+      # analyse la qualité du code avec SonarCloud (Quality Gate)
       - name: SonarCloud analysis
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: mvn -B verify org.sonarsource.scanner.maven:sonar-maven-plugin:sonar -Dsonar.projectKey=Seifcha_tp-devops-correction-docker -Dsonar.organization=seifcha -Dsonar.host.url=https://sonarcloud.io -Dsonar.token=${{ secrets.SONAR_TOKEN }} --file ./simple-api/pom.xml
 
+  # Job 2 : construire et publier les images Docker
   build-and-push-docker-image:
-    # Ne s'exécute que si les tests ont réussi
+    # ne se lance que si test-backend a réussi
     needs: test-backend
     runs-on: ubuntu-24.04
-
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      # Login uniquement sur un push vers main
+      # connexion à Docker Hub avec les secrets GitHub
       - name: Login to DockerHub
-        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-        uses: docker/login-action@v3
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
+        run: echo "${{ secrets.DOCKERHUB_TOKEN }}" | docker login --username ${{ secrets.DOCKERHUB_USERNAME }} --password-stdin
 
+      # image de l'API (publiée uniquement sur main)
       - name: Build image and push backend
         uses: docker/build-push-action@v6
         with:
           context: ./simple-api
-          push: ${{ github.ref == 'refs/heads/main' && github.event_name == 'push' }}
           tags: ${{ secrets.DOCKERHUB_USERNAME }}/tp-devops-simple-api:latest
+          push: ${{ github.ref == 'refs/heads/main' }}
 
+      # image de la base de données
       - name: Build image and push database
         uses: docker/build-push-action@v6
         with:
           context: ./database
-          push: ${{ github.ref == 'refs/heads/main' && github.event_name == 'push' }}
           tags: ${{ secrets.DOCKERHUB_USERNAME }}/tp-devops-database:latest
+          push: ${{ github.ref == 'refs/heads/main' }}
 
+      # image du serveur Apache (reverse proxy)
       - name: Build image and push httpd
         uses: docker/build-push-action@v6
         with:
           context: ./http-server
-          push: ${{ github.ref == 'refs/heads/main' && github.event_name == 'push' }}
           tags: ${{ secrets.DOCKERHUB_USERNAME }}/tp-devops-httpd:latest
+          push: ${{ github.ref == 'refs/heads/main' }}
+
+      # image du front Vue.js
+      - name: Build image and push front
+        uses: docker/build-push-action@v6
+        with:
+          context: ./front
+          tags: ${{ secrets.DOCKERHUB_USERNAME }}/tp-devops-front:latest
+          push: ${{ github.ref == 'refs/heads/main' }}
+
+  # Job 3 : déployer l'application sur le serveur avec Ansible
+  deploy:
+    # ne se lance qu'après la publication des images, et uniquement sur main
+    needs: build-and-push-docker-image
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # installe Ansible (avec la collection community.docker)
+      - name: Install Ansible
+        run: pipx install --include-deps ansible
+
+      # recrée la clé SSH depuis le secret et enregistre le serveur comme connu
+      - name: Set up SSH key
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/takima_key
+          chmod 600 ~/.ssh/takima_key
+          ssh-keyscan -H seifeddine.chargui.takima.school >> ~/.ssh/known_hosts
+
+      # lance le playbook : (re)déploie tous les conteneurs
+      - name: Deploy with Ansible
+        working-directory: ./ansible
+        run: ansible-playbook -i inventories/setup.yml playbook.yml -e ansible_ssh_private_key_file=$HOME/.ssh/takima_key
