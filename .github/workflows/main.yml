@@ -94,7 +94,9 @@ jobs:
 
       # installe Ansible (avec la collection community.docker)
       - name: Install Ansible
-        run: pipx install --include-deps ansible
+        run: |
+          pipx install --include-deps ansible
+          ansible-galaxy collection install community.docker
 
       # recrée la clé SSH depuis le secret et enregistre le serveur comme connu
       - name: Set up SSH key
