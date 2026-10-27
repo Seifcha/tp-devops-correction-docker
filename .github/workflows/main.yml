@@ -100,10 +100,31 @@ jobs:
 
       # recrée la clé SSH depuis le secret et enregistre le serveur comme connu
       - name: Set up SSH key
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
         run: |
           mkdir -p ~/.ssh
-          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/takima_key
+          if [ -z "$SSH_PRIVATE_KEY" ]; then
+            echo "::error::Le secret GitHub 'SSH_PRIVATE_KEY' est vide ou introuvable ! Assurez-vous de l'ajouter dans GitHub (Settings > Secrets and variables > Actions)."
+            exit 1
+          fi
+          # Nettoyage et restauration des sauts de ligne si nécessaire
+          if echo "$SSH_PRIVATE_KEY" | grep -q '\\n'; then
+            echo -e "$SSH_PRIVATE_KEY" > ~/.ssh/takima_key
+          else
+            echo "$SSH_PRIVATE_KEY" > ~/.ssh/takima_key
+          fi
+          # Assurer la fin de ligne unix et un saut de ligne final
+          sed -i -e 's/\r$//' ~/.ssh/takima_key
+          sed -i -e '$a\' ~/.ssh/takima_key
           chmod 600 ~/.ssh/takima_key
+
+          # Valide la clé avant d'appeler Ansible
+          if ! ssh-keygen -y -f ~/.ssh/takima_key > /dev/null 2>&1; then
+            echo "::error::Le format de la clé dans SSH_PRIVATE_KEY est invalide. Vérifiez que vous avez bien copié la clé privée (takima_key / id_rsa) et non la clé publique (.pub)."
+            exit 1
+          fi
+
           ssh-keyscan -H seifeddine.chargui.takima.school >> ~/.ssh/known_hosts
 
       # lance le playbook : (re)déploie tous les conteneurs
