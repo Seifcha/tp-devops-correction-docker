@@ -101,7 +101,7 @@ jobs:
       # recrée la clé SSH depuis le secret et enregistre le serveur comme connu
       - name: Set up SSH key
         env:
-          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY || secrets.SSH_KEY || secrets.TAKIMA_KEY || secrets.PRIVATE_KEY || secrets.ID_RSA }}
         run: |
           mkdir -p ~/.ssh
           if [ -z "$SSH_PRIVATE_KEY" ]; then
